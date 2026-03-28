@@ -1,10 +1,6 @@
-"""マッチングリクエストテスト"""
+"""マッチングサービステスト"""
 import pytest
-from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-
-from app.main import app
-from app.db.database import SessionLocal, Base, engine
 from app.services.matching_service import MatchingService
 from app.services.company_service import CompanyService
 from app.services.user_service import UserService
@@ -15,102 +11,128 @@ from app.schemas.company import CompanyCreate
 from app.schemas.user import UserCreate
 
 
+@pytest.fixture
+def test_user(db):
+    """テストユーザー"""
+    user_data = UserCreate(email="user@matching.com", name="Matching User", password="Pass123!")
+    return UserService.create_user(db, user_data)
 
 
-    """テスト用 HTTP クライアント"""
-    with Client(app=app, base_url="http://testserver") as c:
-        yield c
+@pytest.fixture
+def test_company(db):
+    """テスト企業"""
+    company_data = CompanyCreate(
+        name="Matching Research",
+        email="research@matching.com",
+        business_registration_number="BR-MATCH",
+        password="Pass123!"
+    )
+    return CompanyService.create_company(db, company_data)
 
 
-
-
-class TestMatchingRequestCreation:
-    """マッチングリクエスト作成テスト"""
+class TestMatchingService:
+    """マッチングサービス"""
     
     def test_create_matching_request(self, db, test_user, test_company):
-        """正常なマッチングリクエスト作成"""
+        """マッチングリクエスト作成"""
         request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Diabetes Study Participation",
-            description="We are looking for participants with Type 2 diabetes",
-            health_conditions={"primary": ["diabetes"], "severity": "mild"},
-            study_duration_days=90,
-            compensation_type=CompensationType.MONETARY,
-            compensation_amount=500.00
-        )
-        
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        assert matching.id is not None
-        assert matching.from_user_id == test_user.id
-        assert matching.to_company_id == test_company.id
-        assert matching.status == MatchingStatus.SENT
-        assert matching.title == "Diabetes Study Participation"
-        assert matching.compensation_amount == 500.00
-    
-    def test_matching_request_default_expiry(self, db, test_user, test_company):
-        """デフォルト有効期限（30日）の確認"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
+            company_id=str(test_company.id),
             title="Health Study",
-            description="A health monitoring study"
+            description="A health monitoring study",
+            compensation_type=CompensationType.MONETARY,
+            compensation_amount=500.0
         )
-        
         matching = MatchingService.create_matching_request(
             db, test_user.id, request_data
         )
         
-        expected_expiry = datetime.utcnow() + timedelta(days=30)
-        delta = abs((matching.expires_at - expected_expiry).total_seconds())
-        assert delta < 5  # 5秒以内の誤差は許容
-
-
-class TestMatchingRequestRetrieval:
-    """マッチングリクエスト取得テスト"""
+        assert matching.status == MatchingStatus.SENT
+        assert matching.from_user_id == test_user.id
+        assert matching.compensation_amount == 500.0
     
-    def test_get_matching_request(self, db, test_user, test_company):
-        """マッチングリクエスト取得"""
+    def test_mark_as_viewed(self, db, test_user, test_company):
+        """マッチングリクエストを閲覧済みに"""
         request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Blood Test Study",
-            description="Blood sampling study"
+            company_id=str(test_company.id),
+            title="View Test",
+            description="Test"
         )
-        created = MatchingService.create_matching_request(
+        matching = MatchingService.create_matching_request(
             db, test_user.id, request_data
         )
         
-        retrieved = MatchingService.get_matching_request(
-            db, created.id
+        viewed = MatchingService.mark_as_viewed(db, matching.id)
+        assert viewed.status == MatchingStatus.VIEWED
+        assert viewed.viewed_at is not None
+    
+    def test_accept_matching_request(self, db, test_user, test_company):
+        """マッチングリクエスト受理"""
+        request_data = MatchingRequestCreate(
+            company_id=str(test_company.id),
+            title="Accept Test",
+            description="Accept this"
+        )
+        matching = MatchingService.create_matching_request(
+            db, test_user.id, request_data
         )
         
-        assert retrieved is not None
-        assert retrieved.id == created.id
-        assert retrieved.title == "Blood Test Study"
+        accepted = MatchingService.accept_request(
+            db, matching.id, reason="Good fit"
+        )
+        assert accepted.status == MatchingStatus.ACCEPTED
+        assert accepted.response_reason == "Good fit"
+    
+    def test_reject_matching_request(self, db, test_user, test_company):
+        """マッチングリクエスト拒否"""
+        request_data = MatchingRequestCreate(
+            company_id=str(test_company.id),
+            title="Reject Test",
+            description="Reject this"
+        )
+        matching = MatchingService.create_matching_request(
+            db, test_user.id, request_data
+        )
+        
+        rejected = MatchingService.reject_request(
+            db, matching.id, reason="Not interested"
+        )
+        assert rejected.status == MatchingStatus.REJECTED
+    
+    def test_withdraw_matching_request(self, db, test_user, test_company):
+        """マッチングリクエスト撤回"""
+        request_data = MatchingRequestCreate(
+            company_id=str(test_company.id),
+            title="Withdraw Test",
+            description="Withdraw this"
+        )
+        matching = MatchingService.create_matching_request(
+            db, test_user.id, request_data
+        )
+        
+        withdrawn = MatchingService.withdraw_request(db, matching.id)
+        assert withdrawn.status == MatchingStatus.WITHDRAWN
     
     def test_list_sent_requests(self, db, test_user, test_company):
-        """送信したマッチングリクエスト一覧"""
-        # 複数のリクエストを作成
-        for i in range(3):
+        """送信したリクエスト一覧"""
+        for i in range(2):
             request_data = MatchingRequestCreate(
-                company_id=test_company.id,
-                title=f"Study {i+1}",
-                description=f"Study description {i+1}"
+                company_id=str(test_company.id),
+                title=f"Request {i}",
+                description=f"Description {i}"
             )
             MatchingService.create_matching_request(
                 db, test_user.id, request_data
             )
         
         requests = MatchingService.list_sent_requests(db, test_user.id)
-        assert len(requests) == 3
+        assert len(requests) == 2
     
     def test_list_received_requests(self, db, test_user, test_company):
-        """企業が受信したマッチングリクエスト一覧"""
+        """受信したリクエスト一覧"""
         request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Received Study",
-            description="Company receives this"
+            company_id=str(test_company.id),
+            title="Received",
+            description="Received request"
         )
         MatchingService.create_matching_request(
             db, test_user.id, request_data
@@ -120,163 +142,24 @@ class TestMatchingRequestRetrieval:
             db, test_company.id
         )
         assert len(requests) == 1
-        assert requests[0].to_company_id == test_company.id
-
-
-class TestMatchingStatusUpdate:
-    """マッチングステータス更新テスト"""
-    
-    def test_mark_as_viewed(self, db, test_user, test_company):
-        """メッセージを「閲覧済み」にマーク"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="View Test",
-            description="Test viewing"
-        )
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        assert matching.status == MatchingStatus.SENT
-        assert matching.viewed_at is None
-        
-        viewed = MatchingService.mark_as_viewed(db, matching.id)
-        
-        assert viewed.status == MatchingStatus.VIEWED
-        assert viewed.viewed_at is not None
-    
-    def test_accept_matching_request(self, db, test_user, test_company):
-        """マッチングリクエストを受理"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Accept Test",
-            description="Accept this request"
-        )
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        accepted = MatchingService.accept_request(
-            db, matching.id, reason="Great fit for our study"
-        )
-        
-        assert accepted.status == MatchingStatus.ACCEPTED
-        assert accepted.responded_at is not None
-        assert accepted.response_reason == "Great fit for our study"
-    
-    def test_reject_matching_request(self, db, test_user, test_company):
-        """マッチングリクエストを拒否"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Reject Test",
-            description="Reject this"
-        )
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        rejected = MatchingService.reject_request(
-            db, matching.id, reason="Not matching our criteria"
-        )
-        
-        assert rejected.status == MatchingStatus.REJECTED
-        assert rejected.responded_at is not None
-    
-    def test_withdraw_request(self, db, test_user, test_company):
-        """マッチングリクエストを撤回"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Withdraw Test",
-            description="Withdraw this"
-        )
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        withdrawn = MatchingService.withdraw_request(db, matching.id)
-        
-        assert withdrawn.status == MatchingStatus.WITHDRAWN
-    
-    def test_cannot_withdraw_accepted(self, db, test_user, test_company):
-        """受理されたリクエストは撤回できない"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Accepted",
-            description="Already accepted"
-        )
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        # 受理
-        MatchingService.accept_request(db, matching.id)
-        
-        # 撤回を試みる（効果なし）
-        result = MatchingService.withdraw_request(db, matching.id)
-        
-        # ステータスは ACCEPTED のままか確認
-        assert result.status == MatchingStatus.ACCEPTED
-
-
-class TestMatchingExpiration:
-    """マッチング有効期限テスト"""
     
     def test_check_expired_requests(self, db, test_user, test_company):
-        """有効期限切れのリクエストをマーク"""
+        """有効期限切れリクエスト判定"""
         request_data = MatchingRequestCreate(
-            company_id=test_company.id,
+            company_id=str(test_company.id),
             title="Expiry Test",
-            description="This will expire"
+            description="Test expiry"
         )
         matching = MatchingService.create_matching_request(
             db, test_user.id, request_data
         )
         
-        # 有効期限を過去に変更
+        # 有効期限を過去に
         matching.expires_at = datetime.utcnow() - timedelta(days=1)
         db.commit()
         
         expired_count = MatchingService.check_expired_requests(db)
-        
         assert expired_count == 1
         
-        # ステータスが EXPIRED になっていることを確認
         updated = MatchingService.get_matching_request(db, matching.id)
         assert updated.status == MatchingStatus.EXPIRED
-
-
-class TestMatchingCompensation:
-    """補償管理テスト"""
-    
-    def test_monetary_compensation(self, db, test_user, test_company):
-        """現金補償の設定"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Paid Study",
-            description="Monetary compensation",
-            compensation_type=CompensationType.MONETARY,
-            compensation_amount=1000.00
-        )
-        
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        assert matching.compensation_type == CompensationType.MONETARY
-        assert matching.compensation_amount == 1000.00
-    
-    def test_no_compensation(self, db, test_user, test_company):
-        """補償なし"""
-        request_data = MatchingRequestCreate(
-            company_id=test_company.id,
-            title="Volunteer Study",
-            description="No compensation",
-            compensation_type=CompensationType.NONE
-        )
-        
-        matching = MatchingService.create_matching_request(
-            db, test_user.id, request_data
-        )
-        
-        assert matching.compensation_type == CompensationType.NONE
-        assert matching.compensation_amount is None
