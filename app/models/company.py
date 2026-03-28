@@ -39,6 +39,7 @@ class Company(Base):
     
     # 企業認証
     business_registration_number = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
     verified = Column(Boolean, default=False)
     verified_at = Column(DateTime, nullable=True)
     

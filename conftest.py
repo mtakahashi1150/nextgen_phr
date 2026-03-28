@@ -45,9 +45,9 @@ def db_setup():
     Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="function", autouse=True)
 def db(db_setup):
-    """個別テスト用DBセッション"""
+    """個別テスト用DBセッション（全テストに自動適用）"""
     connection = engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection)

@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import Base, engine
-from app.routers import auth, users, health_records
+from app.routers import auth, users, health_records, companies, consents, matching_requests
 import os
 
 # FastAPIアプリケーションを作成
@@ -32,6 +32,9 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(health_records.router)
+app.include_router(companies.router)
+app.include_router(consents.router)
+app.include_router(matching_requests.router)
 
 
 @app.get("/")

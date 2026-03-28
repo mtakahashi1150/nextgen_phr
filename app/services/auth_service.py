@@ -63,3 +63,36 @@ class AuthService:
         if not AuthService.verify_password(password, user.password_hash):
             return None
         return user
+
+
+# FastAPI依存性注入用の関数
+async def verify_token(authorization: Optional[str] = None) -> str:
+    """
+    FastAPI依存性注入用: トークンを検証して user_id を取得
+    """
+    from fastapi import HTTPException, status
+    
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing"
+        )
+    
+    # "Bearer {token}" フォーマットを処理
+    try:
+        scheme, credentials = authorization.split()
+        if scheme.lower() != "bearer":
+            raise ValueError("Invalid scheme")
+        token = credentials
+    except (ValueError, IndexError):
+        token = authorization
+    
+    user_id = AuthService.verify_token(token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+    
+    return user_id
+
